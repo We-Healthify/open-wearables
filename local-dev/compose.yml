@@ -1,0 +1,74 @@
+name: proms-open-wearables
+
+x-backend: &backend
+  image: proms-open-wearables-backend:6811b286
+  pull_policy: never
+  # Windows Git checkouts can contain CRLF shell scripts. Normalize only the
+  # container copy, including nested scripts invoked by upstream startup.
+  entrypoint:
+    - /bin/bash
+    - -c
+    - 'find scripts -type f -name "*.sh" -exec sed -i "s/\r$$//" {} +; exec bash "$$@"'
+    - --
+  env_file: ../.local/open-wearables/backend.env
+  restart: on-failure
+
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: open-wearables
+      POSTGRES_USER: open-wearables
+      POSTGRES_PASSWORD: local-synthetic-only
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U open-wearables -d open-wearables]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8
+    command: [redis-server, --appendonly, 'yes']
+    volumes:
+      - redis-data:/data
+
+  app:
+    <<: *backend
+    build:
+      context: ../backend
+      args:
+        GIT_SHA: 6811b286c95389d2be20d293d32f393ae4d8a101
+    command: scripts/start/app.sh
+    ports:
+      - '127.0.0.1:8100:8000'
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  celery-worker:
+    <<: *backend
+    command: scripts/start/worker.sh
+    depends_on: [app, redis, db]
+
+  celery-beat:
+    <<: *backend
+    command: scripts/start/beat.sh
+    depends_on: [app, redis, db]
+
+  frontend:
+    image: proms-open-wearables-frontend:6811b286
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile.dev
+    env_file: ../.local/open-wearables/frontend.env
+    ports:
+      - '127.0.0.1:3100:3000'
+    depends_on: [app]
+
+volumes:
+  postgres-data:
+  redis-data:

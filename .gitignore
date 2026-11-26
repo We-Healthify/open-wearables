@@ -180,3 +180,6 @@ CLAUDE.local.md
 # Locally checked-out extensions
 extensions/*
 !extensions/.gitkeep
+
+# Local sandbox credentials and API responses
+.local/
